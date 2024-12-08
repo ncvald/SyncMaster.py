@@ -1,1 +1,1 @@
-# SyncMaster.py
+# SyncMaster Game
