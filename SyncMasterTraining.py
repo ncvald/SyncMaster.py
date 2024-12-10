@@ -1,10 +1,7 @@
 import pygame
-import sys
-import random
 
 # Initialize Pygame
 pygame.init()
-pygame.mixer.init()
 
 # Screen dimensions
 SCREEN_WIDTH = 800
@@ -14,203 +11,168 @@ SCREEN_HEIGHT = 600
 WHITE = (255, 255, 255)
 
 # Load images
-BACKGROUND_IMAGE = 'Background1.jpeg'
-PERFECT_IMAGE = pygame.transform.scale(pygame.image.load('Perfect.png'), (100, 100))
-GOOD_IMAGE = pygame.transform.scale(pygame.image.load('Good.png'), (100, 100))
-MISS_IMAGE = pygame.transform.scale(pygame.image.load('Miss.png'), (100, 100))
-
-# Load audio file
-AUDIO_FILE = 'Level1Song.wav'
-
-# Load ArrowNote image and rotate for different directions
-ARROW_NOTE_IMAGE = pygame.image.load('ArrowNote.png')
-ARROW_NOTE_IMAGES = {
-    'left': pygame.transform.rotate(pygame.transform.scale(ARROW_NOTE_IMAGE, (75, 75)), 180),
-    'up': pygame.transform.rotate(pygame.transform.scale(ARROW_NOTE_IMAGE, (75, 75)), 90),
-    'down': pygame.transform.rotate(pygame.transform.scale(ARROW_NOTE_IMAGE, (75, 75)), 270),
-    'right': pygame.transform.scale(ARROW_NOTE_IMAGE, (75, 75))
+BACKGROUND_IMAGE = 'Background2.jpeg'
+CIRCULAR_NOTE_IMAGE = pygame.image.load('Circular.png')
+COUNTDOWN_IMAGES = {
+    3: pygame.image.load('threetransp.png'),
+    2: pygame.image.load('twotransp.png'),
+    1: pygame.image.load('onetransp.png'),
+    0: pygame.image.load('Now.png')
 }
 
-# Renderer class
+# Renderer class with Singleton pattern
 class Renderer:
-    def __init__(self, screen):
-        self.screen = screen
+    _instance = None  # Class-level reference to the single instance
+
+    def __new__(cls, screen):
+        if cls._instance is None:
+            # Create the instance and store it
+            cls._instance = super(Renderer, cls).__new__(cls)
+            cls._instance.screen = screen  # Initialize instance attribute
+        return cls._instance
 
     def draw_background(self):
         background = pygame.transform.scale(pygame.image.load(BACKGROUND_IMAGE), (SCREEN_WIDTH, SCREEN_HEIGHT))
         self.screen.blit(background, (0, 0))
 
-    def display_result_image(self, image):
-        self.screen.blit(image, (20, 20))  # Display in top left corner
+    def draw_countdown(self, number):
+        if number in COUNTDOWN_IMAGES:
+            countdown_image = pygame.transform.scale(COUNTDOWN_IMAGES[number], (100, 100))
+            self.screen.blit(countdown_image, (20, 85))
 
 # Note class
 class Note:
-    def __init__(self, direction):
-        self.direction = direction
-        self.image = ARROW_NOTE_IMAGES[direction]
-        self.x, self.y = self.get_start_position()
-        self.speed = 3  # Pixels per frame
+    def __init__(self):
+        self.image = pygame.transform.scale(CIRCULAR_NOTE_IMAGE, (75, 75))
+        self.x = SCREEN_WIDTH // 2 - 37  # Centered horizontally
+        self.y = 0  # Start at the top
+        self.target_y = SCREEN_HEIGHT // 2 + 100
+        self.speed = (self.target_y - self.y) / 3000  # Pixels per ms
 
-    def get_start_position(self):
-        if self.direction == 'left':
-            return (SCREEN_WIDTH * 0.07, 0)
-        elif self.direction == 'up':
-            return (SCREEN_WIDTH * 0.32, 0)
-        elif self.direction == 'down':
-            return (SCREEN_WIDTH * 0.59, 0)
-        elif self.direction == 'right':
-            return (SCREEN_WIDTH * 0.83, 0)
-
-    def update_position(self):
-        self.y += self.speed
+    def update_position(self, elapsed_time):
+        self.y = min(self.target_y, self.y + self.speed * elapsed_time)
 
     def draw(self, screen):
         screen.blit(self.image, (self.x, self.y))
 
-# InputHandler class
-class InputHandler:
-    def __init__(self):
-        self.key_mapping = {
-            pygame.K_LEFT: 'left',
-            pygame.K_UP: 'up',
-            pygame.K_DOWN: 'down',
-            pygame.K_RIGHT: 'right'
-        }
-
-    def get_key_pressed(self, event):
-        if event.key in self.key_mapping:
-            return self.key_mapping[event.key]
-        return None
-
-# ScoringSystem class
-class ScoringSystem:
-    def __init__(self):
-        self.score = 0
-        self.current_combo = 0
-        self.best_combo = 0
-        self.stats = {"perfect": 0, "early": 0, "late": 0}
-
-    def check_hit(self, note, key_pressed):
-        hit_points = {
-            'left': (SCREEN_WIDTH * 0.07, SCREEN_HEIGHT * 0.86),
-            'up': (SCREEN_WIDTH * 0.32, SCREEN_HEIGHT * 0.86),
-            'down': (SCREEN_WIDTH * 0.59, SCREEN_HEIGHT * 0.86),
-            'right': (SCREEN_WIDTH * 0.83, SCREEN_HEIGHT * 0.86)
-        }
-        hit_x, hit_y = hit_points[note.direction]
-        y_distance = note.y - hit_y  # Positive means late, negative means early
-
-        # Relaxed margins
-        perfect_margin = 20
-        good_margin = 35
-
-        if abs(y_distance) <= perfect_margin and key_pressed == note.direction:
-            self.score += 100
-            self.current_combo += 1
-            if self.current_combo > self.best_combo:
-                self.best_combo = self.current_combo
-            self.stats["perfect"] += 1
-            return "perfect", 100, ""  # No early/late for perfect
-        elif abs(y_distance) <= good_margin and key_pressed == note.direction:
-            self.score += 50
-            self.current_combo = 0  # Reset combo on good
-            self.stats["early" if y_distance > 0 else "late"] += 1
-            return "good", 50, " (slightly early)" if y_distance < 0 else " (slightly late)"  # Fixed: early when y_distance < 0
-        else:
-            self.current_combo = 0  # Reset combo on miss
-            self.stats["early" if y_distance > 0 else "late"] += 1
-            return "miss", 0, " (late)" if y_distance > 0 else " (early)"
-
-# AudioManager class
-class AudioManager:
-    def __init__(self):
-        pygame.mixer.music.load(AUDIO_FILE)
-
-    def play_music(self):
-        pygame.mixer.music.play(-1)  # Loop the music
-
-    def stop_music(self):
-        pygame.mixer.music.stop()
-
 # Game class
-class Game:
+class TrainingGame:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Rhythm Game")
+        pygame.display.set_caption("Rhythm Training Game")
         self.renderer = Renderer(self.screen)
-        self.input_handler = InputHandler()
-        self.audio_manager = AudioManager()
-        self.scoring_system = ScoringSystem()
-        self.arrow_notes = []
-        self.last_arrow_time = pygame.time.get_ticks()
         self.running = True
-        self.start_time = pygame.time.get_ticks() + 3000  # Start 3 seconds after the game begins
-        self.end_time = self.start_time + 30000  # Stop 30 seconds after notes start
+        self.notes = []
+        self.last_press_time = None
+        self.input_offsets = []
+        self.tendency = None  # Initialize tendency to None
+        self.note_positions = [] # Keep track of note positions 
+
+    def get_user_input(self, prompt):
+        print(prompt)
+        return input().strip().lower()
+
+    def start_sequence(self):
+        print("Welcome to Rhythm Training!")
+        self.tendency = self.get_user_input("Do you have a tendency towards late or early hits? Respond with: late, early, neither:")
+        proceed = self.get_user_input("I see! Do you wish to begin the training sequence? Respond with: yes, no:")
+
+        if proceed != 'yes':
+            print("See you next time!")
+            self.running = False
+        else:
+            # Store the tendency
+            self.tendency = self.tendency
+            pygame.time.delay(6000)
 
     def run(self):
-        self.audio_manager.play_music()
+        self.start_sequence()
+        if not self.running:
+            return
+
+        clock = pygame.time.Clock()
+        start_time = pygame.time.get_ticks()
+        countdown_time = start_time + 3000
+        end_time = start_time + 43000
+
         while self.running:
             current_time = pygame.time.get_ticks()
-            self.handle_events()
-            self.update_notes(current_time)
-            self.draw()
+            self.handle_events(current_time)
+
+            # Draw background
+            self.renderer.draw_background()
+
+            # Draw countdown (changed this)
+            countdown_number = max(0, (countdown_time - current_time) // 1000)
+            self.renderer.draw_countdown(countdown_number)
+
+            # Generate and update notes
+            if len(self.notes) == 0: # Generate a new note if there are no notes
+                countdown_time = current_time + 3000 # Reset countdown timer
+                self.notes.append(Note()) # Append a new note
+
+            for note in self.notes:
+                note.update_position(clock.get_time())
+                note.draw(self.screen)
+                self.note_positions.append((note.x, note.y)) # Store note position
+
             pygame.display.flip()
             clock.tick(60)
-        self.audio_manager.stop_music()
-        self.display_results()
 
-    def handle_events(self):
+            if current_time >= end_time:
+                self.evaluate_performance()
+                self.running = False
+
+        pygame.quit()
+
+    def handle_events(self, current_time):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
-            elif event.type == pygame.KEYDOWN:
-                key_pressed = self.input_handler.get_key_pressed(event)
-                if key_pressed:
-                    for note in self.arrow_notes:
-                        result, points, early_late = self.scoring_system.check_hit(note, key_pressed)
-                        combo_bonus = 100 if self.scoring_system.current_combo > 1 else 0  # Combo bonus for 2+ perfects
-                        if combo_bonus:
-                            print(f"Hit result: {result}{early_late}, Points: {points} +{combo_bonus} (Combo Streak: {self.scoring_system.current_combo})")
-                        else:
-                            print(f"Hit result: {result}{early_late}, Points: {points}")
-                        self.arrow_notes.remove(note)
-                        break  # Only check the first hit
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                self.process_input(current_time) 
 
-    def update_notes(self, current_time):
-        if self.start_time <= current_time <= self.end_time:
-            if current_time - self.last_arrow_time > 1500:
-                direction = random.choice(['left', 'up', 'down', 'right'])
-                new_arrow = Note(direction)
-                self.arrow_notes.append(new_arrow)
-                self.last_arrow_time = current_time
-
-        for note in self.arrow_notes:
-            note.update_position()
-            if note.y > SCREEN_HEIGHT:
-                self.arrow_notes.remove(note)
-
-    def draw(self):
-        self.renderer.draw_background()
-        for note in self.arrow_notes:
-            note.draw(self.screen)
-
-    def display_results(self):
-        print("Thanks for playing!")
-        print(f"Total Score: {self.scoring_system.score}")
-        print(f"Best Combo Streak: {self.scoring_system.best_combo}")
-        stats = self.scoring_system.stats
-        if stats["perfect"] == sum(stats.values()):
-            print("You got rhythm!")
-        elif stats["early"] > stats["late"]:
-            print("You have a tendency towards late inputs.")
-        elif stats["late"] > stats["early"]:
-            print("You have a tendency towards early inputs.")
+    def process_input(self, current_time):
+        if self.notes:
+            note = self.notes.pop(0)
+        offset = current_time - (pygame.time.get_ticks() - 3000)
+        self.input_offsets.append(offset)
+        if 365 <= note.y <= 385:  # Perfect timing range
+            timing = "perfect"
+        elif 355 <= note.y <= 385:  # Good timing ranges (inclusive of 364 and 385)
+            timing = "good"
         else:
-            print("Your inputs are equally early and late!")
+            timing = "miss"  # Outside good or perfect ranges
+        print(f"Timing: {timing}, Offset: {offset} ms, Note Position: ({note.x}, {note.y})")
+
+    def evaluate_performance(self):
+        late_count = sum(1 for pos in self.note_positions if pos[1] > 375)
+        early_count = sum(1 for pos in self.note_positions if pos[1] < 375)
+
+        total_inputs = len(self.note_positions)
+
+        if total_inputs == 0:
+            print("No inputs were recorded. Please try again!")
+            return
+
+        if self.tendency == "late":
+            if early_count > late_count:
+                print("You no longer have a late tendency!")
+            else:
+                print("You still have a tendency towards late hits! Try the training mode again!")
+        elif self.tendency == "early":
+            if late_count > early_count:
+                print("You no longer have an early tendency!")
+            else:
+                print("You still have a tendency towards early hits! Try the training mode again!")
+        elif self.tendency == "neither":
+            if early_count == late_count:
+                print("You have no tendency towards early or late hits. Keep practicing!")
+            else:
+                dominant_tendency = "late" if late_count > early_count else "early"
+                print(f"You now seem to have a tendency towards {dominant_tendency} hits. Keep training!")
+
 
 if __name__ == "__main__":
-    clock = pygame.time.Clock()
-    game = Game()
+    game = TrainingGame()
     game.run()
-    pygame.quit()
-    sys.exit()
